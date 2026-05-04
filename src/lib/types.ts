@@ -9,6 +9,12 @@ export interface Category {
   type: CategoryType
   color: string
   icon: string
+  parent_id?: string | null
+  display_order?: number
+}
+
+export interface CategoryGroup extends Category {
+  children: Category[]
 }
 
 export interface Account {

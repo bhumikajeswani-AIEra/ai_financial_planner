@@ -1,86 +1,94 @@
 import { createClient } from '@/lib/supabase/server'
-import { formatCurrency, currentMonth } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { TrendingUp, TrendingDown, Wallet, Target } from 'lucide-react'
-import type { Transaction, Budget, Investment, SavingsGoal } from '@/lib/types'
+import type { Transaction, Budget, Investment, SavingsGoal, Category } from '@/lib/types'
 import { format } from 'date-fns'
 import { GoogleIntegrations } from '@/components/dashboard/GoogleIntegrations'
 
 export const dynamic = 'force-dynamic'
 export const metadata = { title: 'Dashboard — FinPlan' }
 
+function merchantFromNote(note: string | null): string {
+  if (!note) return ''
+  const parts = note.split('|')
+  return parts.length > 1 ? parts[1] : ''
+}
+
 export default async function DashboardPage() {
   const supabase = await createClient()
-  const month = currentMonth()
-  const startOfMonth = `${month}-01`
 
   const [
-    { data: transactions },
+    { data: allTxns },
     { data: budgets },
     { data: investments },
     { data: goals },
     { data: accounts },
-    { data: categories },
+    { data: allCategories },
   ] = await Promise.all([
     supabase
       .from('transactions')
       .select('*, category:categories(*)')
-      .gte('date', startOfMonth)
       .order('date', { ascending: false }),
-    supabase
-      .from('budgets')
-      .select('*, category:categories(*)')
-      .eq('month', month),
+    supabase.from('budgets').select('*, category:categories(*)'),
     supabase.from('investments').select('*'),
     supabase.from('savings_goals').select('*'),
     supabase.from('accounts').select('*'),
-    supabase.from('categories').select('*').eq('type', 'expense').limit(1),
+    supabase.from('categories').select('*').order('display_order'),
   ])
 
-  const txns = (transactions ?? []) as Transaction[]
-  const defaultCategoryId = (categories ?? [])[0]?.id ?? ''
-  const defaultAccountId = (accounts ?? [])[0]?.id ?? ''
+  const txns = (allTxns ?? []) as Transaction[]
+  const cats = (allCategories ?? []) as Category[]
   const bdgts = (budgets ?? []) as Budget[]
   const invts = (investments ?? []) as Investment[]
   const glts = (goals ?? []) as SavingsGoal[]
 
-  const totalExpenses = txns
-    .filter((t) => t.type === 'expense')
-    .reduce((s, t) => s + t.amount, 0)
-  const totalIncome = txns
-    .filter((t) => t.type === 'income')
-    .reduce((s, t) => s + t.amount, 0)
+  // L1/L2 maps
+  const l1Map = Object.fromEntries(cats.filter(c => !c.parent_id).map(c => [c.id, c]))
+  const l2ToL1 = Object.fromEntries(cats.filter(c => c.parent_id).map(c => [c.id, c.parent_id!]))
+
+  // Latest month with transactions
+  const latestDate = txns[0]?.date
+  const latestMonth = latestDate ? latestDate.slice(0, 7) : new Date().toISOString().slice(0, 7)
+  const startOfLatestMonth = `${latestMonth}-01`
+
+  const monthTxns = txns.filter(t => t.date >= startOfLatestMonth && t.date <= `${latestMonth}-31`)
+  const monthExpenses = monthTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+  const monthIncome = monthTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+
   const totalBudgeted = bdgts.reduce((s, b) => s + b.amount, 0)
+  const budgetUsedPct = totalBudgeted > 0 ? Math.min((monthExpenses / totalBudgeted) * 100, 100) : 0
+
   const totalInvested = invts.reduce((s, i) => s + i.buy_price * i.units, 0)
   const totalCurrentValue = invts.reduce((s, i) => s + i.current_price * i.units, 0)
   const accountsTotal = (accounts ?? []).reduce((s: number, a: { balance: number }) => s + a.balance, 0)
   const netWorth = accountsTotal + totalCurrentValue
 
-  const budgetUsedPct = totalBudgeted > 0 ? Math.min((totalExpenses / totalBudgeted) * 100, 100) : 0
-
-  const spendByCategory = txns
-    .filter((t) => t.type === 'expense' && t.category)
-    .reduce((acc: Record<string, { name: string; color: string; amount: number }>, t) => {
-      const id = t.category_id
-      if (!acc[id]) acc[id] = { name: t.category!.name, color: t.category!.color, amount: 0 }
-      acc[id].amount += t.amount
-      return acc
-    }, {})
-
-  const topCategories = Object.values(spendByCategory)
+  // All-time L1 spend breakdown
+  const l1Spend: Record<string, { name: string; color: string; amount: number }> = {}
+  for (const t of txns.filter(t => t.type === 'expense')) {
+    const l1Id = l2ToL1[t.category_id] ?? t.category_id
+    const l1 = l1Map[l1Id]
+    if (!l1) continue
+    if (!l1Spend[l1Id]) l1Spend[l1Id] = { name: l1.name, color: l1.color, amount: 0 }
+    l1Spend[l1Id].amount += t.amount
+  }
+  const topCategories = Object.values(l1Spend)
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 5)
 
+  const defaultCategoryId = cats.find(c => c.parent_id)?.id ?? ''
+  const defaultAccountId = (accounts ?? [])[0]?.id ?? ''
   const recentTxns = txns.slice(0, 5)
 
   return (
     <div className="p-6 space-y-6 max-w-5xl mx-auto">
       <div>
         <h1 className="text-xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">{format(new Date(), 'MMMM yyyy')}</p>
+        <p className="text-sm text-muted-foreground">{format(new Date(`${latestMonth}-15`), 'MMMM yyyy')}</p>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -92,14 +100,14 @@ export default async function DashboardPage() {
         />
         <SummaryCard
           title="Month Spent"
-          value={formatCurrency(totalExpenses)}
+          value={formatCurrency(monthExpenses)}
           icon={<TrendingDown className="h-4 w-4 text-destructive" />}
           sub={totalBudgeted > 0 ? `of ${formatCurrency(totalBudgeted)} budgeted` : 'no budget set'}
-          highlight={totalBudgeted > 0 && totalExpenses > totalBudgeted}
+          highlight={totalBudgeted > 0 && monthExpenses > totalBudgeted}
         />
         <SummaryCard
           title="Income"
-          value={formatCurrency(totalIncome)}
+          value={formatCurrency(monthIncome)}
           icon={<TrendingUp className="h-4 w-4 text-green-500" />}
           sub="this month"
         />
@@ -119,12 +127,12 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{formatCurrency(totalExpenses)} spent</span>
+              <span className="text-muted-foreground">{formatCurrency(monthExpenses)} spent</span>
               <span className="font-medium">{Math.round(budgetUsedPct)}%</span>
             </div>
             <Progress value={budgetUsedPct} className="h-2" />
             <p className="text-xs text-muted-foreground">
-              {formatCurrency(Math.max(totalBudgeted - totalExpenses, 0))} remaining
+              {formatCurrency(Math.max(totalBudgeted - monthExpenses, 0))} remaining
             </p>
           </CardContent>
         </Card>
@@ -133,17 +141,20 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Top Spending This Month</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Top Spending
+              <span className="text-muted-foreground font-normal ml-1 text-xs">all time</span>
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {topCategories.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No expenses this month yet.</p>
+              <p className="text-sm text-muted-foreground">No expenses yet.</p>
             ) : (
               topCategories.map((cat) => (
                 <div key={cat.name} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
-                    <span>{cat.name}</span>
+                    <span className="capitalize">{cat.name}</span>
                   </div>
                   <span className="font-medium tabular-nums">{formatCurrency(cat.amount)}</span>
                 </div>
@@ -193,28 +204,35 @@ export default async function DashboardPage() {
         </CardHeader>
         <CardContent>
           {recentTxns.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No transactions this month. Add one in Expenses.</p>
+            <p className="text-sm text-muted-foreground">No transactions yet. Add one in Expenses.</p>
           ) : (
             <div>
-              {recentTxns.map((t, i) => (
-                <div key={t.id}>
-                  <div className="flex items-center justify-between py-2.5 text-sm">
-                    <div className="flex items-center gap-3">
-                      {t.category && (
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: t.category.color }} />
-                      )}
-                      <div>
-                        <p className="font-medium">{t.category?.name ?? 'Uncategorised'}</p>
-                        <p className="text-xs text-muted-foreground">{t.note ?? t.date}</p>
+              {recentTxns.map((t, i) => {
+                const merchant = merchantFromNote(t.note)
+                const l1Id = l2ToL1[t.category_id]
+                const l1 = l1Id ? l1Map[l1Id] : null
+                const displayColor = l1?.color ?? t.category?.color ?? '#94a3b8'
+                return (
+                  <div key={t.id}>
+                    <div className="flex items-center justify-between py-2.5 text-sm">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: displayColor }} />
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{merchant || t.category?.name || 'Uncategorised'}</p>
+                          <p className="text-xs text-muted-foreground capitalize">
+                            {l1 ? `${l1.name} › ${t.category?.name}` : t.category?.name ?? ''}
+                            {' · '}{t.date}
+                          </p>
+                        </div>
                       </div>
+                      <Badge variant={t.type === 'income' ? 'default' : 'secondary'}>
+                        {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+                      </Badge>
                     </div>
-                    <Badge variant={t.type === 'income' ? 'default' : 'secondary'}>
-                      {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
-                    </Badge>
+                    {i < recentTxns.length - 1 && <Separator />}
                   </div>
-                  {i < recentTxns.length - 1 && <Separator />}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>

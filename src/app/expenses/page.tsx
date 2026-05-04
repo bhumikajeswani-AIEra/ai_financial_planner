@@ -12,9 +12,9 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Trash2, Upload, Loader2, CheckCircle2 } from 'lucide-react'
-import type { Transaction, Category } from '@/lib/types'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Plus, Trash2, Upload, Loader2, CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
+import type { Transaction, Category, CategoryGroup } from '@/lib/types'
 
 interface ExtractedRow {
   date: string
@@ -24,6 +24,23 @@ interface ExtractedRow {
   suggestedCategory: string
   suggestedCategoryId: string | null
   selected: boolean
+}
+
+function merchantFromNote(note: string | null): string {
+  if (!note) return ''
+  const parts = note.split('|')
+  return parts.length > 1 ? parts[1] : ''
+}
+
+function buildGroups(categories: Category[]): CategoryGroup[] {
+  const l1 = categories.filter(c => !c.parent_id).sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+  const l2 = categories.filter(c => c.parent_id)
+  return l1.map(parent => ({
+    ...parent,
+    children: l2
+      .filter(c => c.parent_id === parent.id)
+      .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0)),
+  }))
 }
 
 export default function ExpensesPage() {
@@ -40,6 +57,7 @@ export default function ExpensesPage() {
   const [extracted, setExtracted] = useState<ExtractedRow[]>([])
   const [saving, setSaving] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const [expandedL1, setExpandedL1] = useState<Set<string>>(new Set())
 
   const [form, setForm] = useState({
     amount: '',
@@ -60,7 +78,10 @@ export default function ExpensesPage() {
       .order('created_at', { ascending: false })
     setTransactions((data ?? []) as Transaction[])
 
-    const { data: cats } = await supabase.from('categories').select('*').order('name')
+    const { data: cats } = await supabase
+      .from('categories')
+      .select('*')
+      .order('display_order')
     setCategories((cats ?? []) as Category[])
   }
 
@@ -92,13 +113,10 @@ export default function ExpensesPage() {
     setExtracting(true)
     setPdfOpen(true)
     setExtracted([])
-
     const fd = new FormData()
     fd.append('file', file)
-
     const res = await fetch('/api/bills', { method: 'POST', body: fd })
     const data = await res.json()
-
     setExtracted((data.transactions ?? []).map((t: ExtractedRow) => ({ ...t, selected: true })))
     setExtracting(false)
     if (fileRef.current) fileRef.current.value = ''
@@ -108,11 +126,9 @@ export default function ExpensesPage() {
     const toSave = extracted.filter(t => t.selected)
     if (!toSave.length || !userId) return
     setSaving(true)
-
     const { data: cats } = await supabase.from('categories').select('id, name').eq('user_id', userId)
     const catMap = Object.fromEntries((cats ?? []).map(c => [c.name, c.id]))
     const fallbackId = cats?.[0]?.id ?? null
-
     const rows = toSave.map(t => ({
       amount: t.amount,
       type: t.type,
@@ -121,7 +137,6 @@ export default function ExpensesPage() {
       note: t.description.slice(0, 100),
       user_id: userId,
     }))
-
     await supabase.from('transactions').insert(rows)
     setSaving(false)
     setPdfOpen(false)
@@ -129,10 +144,37 @@ export default function ExpensesPage() {
     startTransition(() => { load() })
   }
 
-  const filtered = filterType === 'all' ? transactions : transactions.filter((t) => t.type === filterType)
-  const filteredCategories = categories.filter((c) => c.type === form.type)
-  const totalExpense = transactions.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-  const totalIncome = transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+  const filtered = filterType === 'all' ? transactions : transactions.filter(t => t.type === filterType)
+  const groups = buildGroups(categories)
+  const filteredGroups = groups.filter(g => g.type === form.type)
+
+  // L1 spend breakdown (all expenses)
+  const l1Map = Object.fromEntries(categories.filter(c => !c.parent_id).map(c => [c.id, c]))
+  const l2ToL1 = Object.fromEntries(categories.filter(c => c.parent_id).map(c => [c.id, c.parent_id!]))
+
+  const l1Spend: Record<string, { name: string; color: string; amount: number; children: Record<string, { name: string; amount: number }> }> = {}
+  for (const t of transactions.filter(t => t.type === 'expense')) {
+    const l1Id = l2ToL1[t.category_id] ?? t.category_id
+    const l1 = l1Map[l1Id]
+    if (!l1) continue
+    if (!l1Spend[l1Id]) l1Spend[l1Id] = { name: l1.name, color: l1.color, amount: 0, children: {} }
+    l1Spend[l1Id].amount += t.amount
+    const l2Name = t.category?.name ?? 'others'
+    if (!l1Spend[l1Id].children[l2Name]) l1Spend[l1Id].children[l2Name] = { name: l2Name, amount: 0 }
+    l1Spend[l1Id].children[l2Name].amount += t.amount
+  }
+  const sortedL1 = Object.entries(l1Spend).sort((a, b) => b[1].amount - a[1].amount)
+
+  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+  const totalIncome = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+
+  function toggleL1(id: string) {
+    setExpandedL1(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
@@ -178,8 +220,13 @@ export default function ExpensesPage() {
               <Select value={form.category_id} onValueChange={(v) => setForm({ ...form, category_id: v ?? '' })}>
                 <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                 <SelectContent>
-                  {filteredCategories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  {filteredGroups.map(l1 => (
+                    <SelectGroup key={l1.id}>
+                      <SelectLabel className="capitalize">{l1.name}</SelectLabel>
+                      {l1.children.map(l2 => (
+                        <SelectItem key={l2.id} value={l2.id} className="pl-5 capitalize">{l2.name}</SelectItem>
+                      ))}
+                    </SelectGroup>
                   ))}
                 </SelectContent>
               </Select>
@@ -200,9 +247,7 @@ export default function ExpensesPage() {
       {/* PDF preview dialog */}
       <Dialog open={pdfOpen} onOpenChange={setPdfOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Review Extracted Transactions</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Review Extracted Transactions</DialogTitle></DialogHeader>
           {extracting ? (
             <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -212,7 +257,7 @@ export default function ExpensesPage() {
             <p className="text-sm text-muted-foreground py-8 text-center">No transactions could be extracted from this PDF.</p>
           ) : (
             <div className="space-y-3">
-              <p className="text-xs text-muted-foreground">{extracted.filter(t => t.selected).length} of {extracted.length} selected — deselect any you don&apos;t want to import.</p>
+              <p className="text-xs text-muted-foreground">{extracted.filter(t => t.selected).length} of {extracted.length} selected</p>
               <div className="space-y-2">
                 {extracted.map((t, i) => (
                   <div
@@ -241,6 +286,7 @@ export default function ExpensesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Summary */}
       <div className="grid grid-cols-2 gap-4">
         <Card>
           <CardContent className="pt-5 pb-4">
@@ -256,6 +302,47 @@ export default function ExpensesPage() {
         </Card>
       </div>
 
+      {/* L1 Spend Breakdown */}
+      {sortedL1.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Spend by Category</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1">
+            {sortedL1.map(([l1Id, l1]) => {
+              const pct = totalExpense > 0 ? (l1.amount / totalExpense) * 100 : 0
+              const isExpanded = expandedL1.has(l1Id)
+              const sortedChildren = Object.values(l1.children).sort((a, b) => b.amount - a.amount)
+              return (
+                <div key={l1Id}>
+                  <button
+                    onClick={() => toggleL1(l1Id)}
+                    className="w-full flex items-center gap-3 py-2 text-sm hover:bg-muted/40 rounded px-1 transition-colors"
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: l1.color }} />
+                    <span className="flex-1 text-left capitalize font-medium">{l1.name}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">{Math.round(pct)}%</span>
+                    <span className="font-medium tabular-nums w-20 text-right">{formatCurrency(l1.amount)}</span>
+                    {isExpanded ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+                  </button>
+                  {isExpanded && (
+                    <div className="ml-5 mb-1 space-y-0.5 border-l pl-4 border-muted">
+                      {sortedChildren.map(child => (
+                        <div key={child.name} className="flex items-center justify-between py-1 text-xs text-muted-foreground">
+                          <span className="capitalize">{child.name}</span>
+                          <span className="tabular-nums">{formatCurrency(child.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Transaction list */}
       <Card>
         <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
           <CardTitle className="text-sm font-medium">Transactions</CardTitle>
@@ -272,28 +359,37 @@ export default function ExpensesPage() {
             <p className="text-sm text-muted-foreground py-4 text-center">No transactions found.</p>
           ) : (
             <div>
-              {filtered.map((t, i) => (
-                <div key={t.id}>
-                  <div className="flex items-center justify-between py-2.5 text-sm group">
-                    <div className="flex items-center gap-3">
-                      {t.category && <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: t.category.color }} />}
-                      <div>
-                        <p className="font-medium">{t.category?.name ?? 'Uncategorised'}</p>
-                        <p className="text-xs text-muted-foreground">{t.note ? `${t.note} · ` : ''}{formatDate(t.date)}</p>
+              {filtered.map((t, i) => {
+                const merchant = merchantFromNote(t.note)
+                const l1Id = l2ToL1[t.category_id]
+                const l1 = l1Id ? l1Map[l1Id] : null
+                const displayColor = l1?.color ?? t.category?.color ?? '#94a3b8'
+                return (
+                  <div key={t.id}>
+                    <div className="flex items-center justify-between py-2.5 text-sm group">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: displayColor }} />
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{merchant || t.category?.name || 'Uncategorised'}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {l1 ? <span className="capitalize">{l1.name} › {t.category?.name}</span> : <span className="capitalize">{t.category?.name}</span>}
+                            {' · '}{formatDate(t.date)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <Badge variant={t.type === 'income' ? 'default' : 'secondary'}>
+                          {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+                        </Badge>
+                        <Button size="icon" variant="ghost" className="h-7 w-7 opacity-0 group-hover:opacity-100" onClick={() => deleteTransaction(t.id)}>
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <Badge variant={t.type === 'income' ? 'default' : 'secondary'}>
-                        {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
-                      </Badge>
-                      <Button size="icon" variant="ghost" className="h-7 w-7 opacity-0 group-hover:opacity-100" onClick={() => deleteTransaction(t.id)}>
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </Button>
-                    </div>
+                    {i < filtered.length - 1 && <Separator />}
                   </div>
-                  {i < filtered.length - 1 && <Separator />}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
