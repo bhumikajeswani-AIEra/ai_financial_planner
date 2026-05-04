@@ -13,17 +13,29 @@ export async function POST(req: NextRequest) {
 
   const buffer = Buffer.from(await file.arrayBuffer())
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require('pdf-parse')
-  const pdf = await pdfParse(buffer)
-  const text = pdf.text
+  let text: string
+  try {
+    // Use lib path directly to avoid pdf-parse loading test files (causes slowness)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require('pdf-parse/lib/pdf-parse.js')
+    const pdf = await pdfParse(buffer)
+    text = pdf.text
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.toLowerCase().includes('encrypt') || msg.toLowerCase().includes('password')) {
+      return NextResponse.json({
+        error: 'This PDF is password-protected. Please remove the password and re-upload.',
+        transactions: [],
+      }, { status: 422 })
+    }
+    return NextResponse.json({ error: 'Could not read PDF. Please try a different file.', transactions: [] }, { status: 422 })
+  }
 
   const extracted = extractTransactions(text)
   if (!extracted.length) {
     return NextResponse.json({ message: 'No transactions found in PDF', transactions: [] })
   }
 
-  // Fetch user's categories to map suggestions
   const { data: categories } = await supabase
     .from('categories')
     .select('id, name')
