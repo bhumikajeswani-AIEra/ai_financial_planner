@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Sidebar from "@/components/layout/Sidebar";
+import Sidebar from "@/components/layout/Sidebar"
+import { headers } from "next/headers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,18 +19,22 @@ export const metadata: Metadata = {
   description: "Track expenses, budgets, investments, and savings goals",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const headersList = await headers()
+  const pathname = headersList.get('x-invoke-path') ?? ''
+  const isAuthPage = pathname === '/login' || pathname === '/signup'
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex bg-background text-foreground">
-        <Sidebar />
+        {!isAuthPage && <Sidebar />}
         <main className="flex-1 overflow-auto">
           {children}
         </main>

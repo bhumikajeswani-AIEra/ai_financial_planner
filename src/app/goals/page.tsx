@@ -25,6 +25,7 @@ export default function GoalsPage() {
   const [addOpen, setAddOpen] = useState(false)
   const [contributeGoal, setContributeGoal] = useState<SavingsGoal | null>(null)
   const [isPending, startTransition] = useTransition()
+  const [userId, setUserId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     name: '',
@@ -35,6 +36,8 @@ export default function GoalsPage() {
   const [contribution, setContribution] = useState('')
 
   async function load() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) setUserId(user.id)
     const { data } = await supabase.from('savings_goals').select('*').order('deadline')
     setGoals((data ?? []) as SavingsGoal[])
   }
@@ -42,13 +45,14 @@ export default function GoalsPage() {
   useEffect(() => { load() }, [])
 
   async function addGoal() {
-    if (!form.name || !form.target_amount || !form.deadline) return
+    if (!form.name || !form.target_amount || !form.deadline || !userId) return
     await supabase.from('savings_goals').insert({
       name: form.name,
       target_amount: parseFloat(form.target_amount),
       current_amount: 0,
       deadline: form.deadline,
       color: form.color,
+      user_id: userId,
     })
     setAddOpen(false)
     setForm({ name: '', target_amount: '', deadline: '', color: GOAL_COLORS[0] })

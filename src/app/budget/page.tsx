@@ -29,8 +29,11 @@ export default function BudgetPage() {
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({ category_id: '', amount: '' })
+  const [userId, setUserId] = useState<string | null>(null)
 
   async function load() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) setUserId(user.id)
     const startOfMonth = `${month}-01`
     const [{ data: bdgts }, { data: cats }, { data: txns }] = await Promise.all([
       supabase.from('budgets').select('*, category:categories(*)').eq('month', month),
@@ -45,9 +48,9 @@ export default function BudgetPage() {
   useEffect(() => { load() }, [])
 
   async function saveBudget() {
-    if (!form.category_id || !form.amount) return
+    if (!form.category_id || !form.amount || !userId) return
     await supabase.from('budgets').upsert(
-      { category_id: form.category_id, month, amount: parseFloat(form.amount) },
+      { category_id: form.category_id, month, amount: parseFloat(form.amount), user_id: userId },
       { onConflict: 'category_id,month' }
     )
     setOpen(false)

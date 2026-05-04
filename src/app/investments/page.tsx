@@ -29,6 +29,7 @@ export default function InvestmentsPage() {
   const [investments, setInvestments] = useState<Investment[]>([])
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const [userId, setUserId] = useState<string | null>(null)
   const [form, setForm] = useState({
     name: '',
     type: 'MF' as InvestmentType,
@@ -38,6 +39,8 @@ export default function InvestmentsPage() {
   })
 
   async function load() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) setUserId(user.id)
     const { data } = await supabase.from('investments').select('*').order('created_at', { ascending: false })
     setInvestments((data ?? []) as Investment[])
   }
@@ -45,13 +48,14 @@ export default function InvestmentsPage() {
   useEffect(() => { load() }, [])
 
   async function addInvestment() {
-    if (!form.name || !form.buy_price || !form.current_price) return
+    if (!form.name || !form.buy_price || !form.current_price || !userId) return
     await supabase.from('investments').insert({
       name: form.name,
       type: form.type,
       units: parseFloat(form.units) || 1,
       buy_price: parseFloat(form.buy_price),
       current_price: parseFloat(form.current_price),
+      user_id: userId,
     })
     setOpen(false)
     setForm({ name: '', type: 'MF', units: '', buy_price: '', current_price: '' })
