@@ -34,7 +34,7 @@ type SourceType = 'UPI' | 'RTGS' | 'CC' | 'Manual'
 
 function getSource(txn: Transaction): SourceType {
   const note = txn.note ?? ''
-  if (note.startsWith('cc:')) return 'CC'
+  if (note.startsWith('cc:') || note.startsWith('pdf:')) return 'CC'
   if (note.startsWith('gmail:')) {
     const merchant = (note.split('|')[1] ?? '').toLowerCase()
     if (txn.type === 'income' && /finarkein|salary|reimbursement/i.test(merchant)) return 'RTGS'
@@ -261,7 +261,7 @@ export default function ExpensesPage() {
       type: t.type,
       category_id: t.suggestedCategoryId ?? catMap[t.suggestedCategory?.toLowerCase()] ?? fallbackId,
       date: t.date,
-      note: `cc:|${t.description.slice(0, 80)}`,  // tag as CC source
+      note: `pdf:|${t.description.slice(0, 80)}`,
       user_id: userId,
     }))
     await supabase.from('transactions').insert(rows)
@@ -286,14 +286,17 @@ export default function ExpensesPage() {
           <h1 className="text-xl font-semibold">Expenses</h1>
           <p className="text-sm text-muted-foreground">{availableMonths.length} months of data</p>
         </div>
-        <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handlePdfUpload} />
-          <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
-            <Upload className="h-4 w-4 mr-1" /> Upload Statement
-          </Button>
-          <Button size="sm" onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" /> Add
-          </Button>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex gap-2">
+            <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handlePdfUpload} />
+            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
+              <Upload className="h-4 w-4 mr-1" /> Upload Statement
+            </Button>
+            <Button size="sm" onClick={() => setOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" /> Add
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">HDFC · ICICI · SBI · Axis · Paytm · CC — or Print to PDF from net banking</p>
         </div>
       </div>
 
@@ -401,14 +404,24 @@ export default function ExpensesPage() {
               <Select value={form.category_id} onValueChange={v => setForm({ ...form, category_id: v ?? '' })}>
                 <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                 <SelectContent>
-                  {filteredGroups.map(l1 => (
-                    <SelectGroup key={l1.id}>
-                      <SelectLabel className="capitalize">{l1.name}</SelectLabel>
-                      {l1.children.map(l2 => (
-                        <SelectItem key={l2.id} value={l2.id} className="pl-5 capitalize">{l2.name}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ))}
+                  {filteredGroups.map(l1 => {
+                    const seenNames = new Set<string>()
+                    const uniqueChildren = l1.children.filter(l2 => {
+                      const key = l2.name.toLowerCase()
+                      if (seenNames.has(key)) return false
+                      seenNames.add(key)
+                      return true
+                    })
+                    if (uniqueChildren.length === 0) return null
+                    return (
+                      <SelectGroup key={l1.id}>
+                        <SelectLabel className="capitalize font-semibold text-foreground text-xs tracking-wide py-1.5">{l1.name}</SelectLabel>
+                        {uniqueChildren.map(l2 => (
+                          <SelectItem key={l2.id} value={l2.id} className="pl-6 capitalize text-muted-foreground">{l2.name}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -428,7 +441,7 @@ export default function ExpensesPage() {
       {/* PDF import dialog */}
       <Dialog open={pdfOpen} onOpenChange={setPdfOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Import from Statement</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Import from Bank / CC Statement</DialogTitle></DialogHeader>
           {extracting ? (
             <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -465,7 +478,7 @@ export default function ExpensesPage() {
                 ))}
               </div>
               <Button onClick={saveExtracted} className="w-full" disabled={saving || extracted.filter(t => t.selected).length === 0}>
-                {saving ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving…</> : `Import ${extracted.filter(t => t.selected).length} transactions as CC`}
+                {saving ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving…</> : `Import ${extracted.filter(t => t.selected).length} transactions`}
               </Button>
             </div>
           )}

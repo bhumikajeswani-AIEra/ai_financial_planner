@@ -14,7 +14,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Plus, Pencil } from 'lucide-react'
 import type { Budget, Category, Transaction } from '@/lib/types'
@@ -74,6 +74,19 @@ export default function BudgetPage() {
   const budgetedCategoryIds = new Set(budgets.map((b) => b.category_id))
   const unbudgetedCategories = categories.filter((c) => !budgetedCategoryIds.has(c.id))
 
+  const l1Categories = unbudgetedCategories.filter(c => !c.parent_id)
+  const l2Categories = unbudgetedCategories.filter(c => c.parent_id)
+  const groupedUnbudgeted = l1Categories.map(l1 => {
+    const seenNames = new Set<string>()
+    const children = l2Categories.filter(c => c.parent_id === l1.id).filter(c => {
+      const key = c.name.toLowerCase()
+      if (seenNames.has(key)) return false
+      seenNames.add(key)
+      return true
+    })
+    return { ...l1, children }
+  }).filter(g => g.children.length > 0)
+
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
@@ -81,7 +94,7 @@ export default function BudgetPage() {
           <h1 className="text-xl font-semibold">Budget</h1>
           <p className="text-sm text-muted-foreground">{month} · vs actuals</p>
         </div>
-        <Button size="sm" disabled={unbudgetedCategories.length === 0} onClick={() => setOpen(true)}>
+        <Button size="sm" disabled={groupedUnbudgeted.length === 0} onClick={() => setOpen(true)}>
           <Plus className="h-4 w-4 mr-1" /> Set Budget
         </Button>
         <Dialog open={open} onOpenChange={setOpen}>
@@ -95,8 +108,13 @@ export default function BudgetPage() {
                 <Select value={form.category_id} onValueChange={(v) => setForm({ ...form, category_id: v ?? '' })}>
                   <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                   <SelectContent>
-                    {unbudgetedCategories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    {groupedUnbudgeted.map(l1 => (
+                      <SelectGroup key={l1.id}>
+                        <SelectLabel className="capitalize font-semibold text-foreground text-xs tracking-wide py-1.5">{l1.name}</SelectLabel>
+                        {l1.children.map(l2 => (
+                          <SelectItem key={l2.id} value={l2.id} className="pl-6 capitalize text-muted-foreground">{l2.name}</SelectItem>
+                        ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>

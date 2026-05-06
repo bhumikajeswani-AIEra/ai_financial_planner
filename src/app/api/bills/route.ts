@@ -24,14 +24,14 @@ export async function POST(req: NextRequest) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.toLowerCase().includes('encrypt') || msg.toLowerCase().includes('password')) {
       return NextResponse.json({
-        error: 'This PDF is password-protected. Please remove the password and re-upload.',
+        error: 'This PDF is password-protected (common with HDFC/ICICI statements). Open it in Chrome, enter your password, then File → Print → Save as PDF and upload that instead.',
         transactions: [],
       }, { status: 422 })
     }
     return NextResponse.json({ error: 'Could not read PDF. Please try a different file.', transactions: [] }, { status: 422 })
   }
 
-  const extracted = extractTransactions(text)
+  const extracted = await extractTransactions(text)
   if (!extracted.length) {
     return NextResponse.json({ message: 'No transactions found in PDF', transactions: [] })
   }

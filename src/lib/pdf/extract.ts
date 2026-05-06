@@ -1,3 +1,5 @@
+import Anthropic from '@anthropic-ai/sdk'
+
 export interface ExtractedTransaction {
   date: string
   description: string
@@ -6,88 +8,74 @@ export interface ExtractedTransaction {
   rawLine: string
 }
 
-// Amount patterns — handles Indian formats: 1,23,456.78 and 1234.56
-const AMOUNT_RE = /(?:Rs\.?|INR|₹)?\s*([\d,]+\.\d{2})\s*(?:Dr|Cr)?/gi
-const DR_CR_RE = /\b(Dr|Debit|Purchase|Payment|Withdrawal)\b/i
-const CR_RE = /\b(Cr|Credit|Refund|Cashback|Reversal)\b/i
+const client = new Anthropic()
 
-// Date patterns: DD/MM/YYYY, DD-MM-YYYY, DD MMM YYYY, MMM DD YYYY
-const DATE_RE = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}[,\s]+\d{4})/i
+const SYSTEM_PROMPT = `You are a bank statement parser. Extract all financial transactions from the raw text of an Indian bank statement (HDFC, ICICI, SBI, Axis, Paytm, Kotak, Yes Bank, IndusInd, etc.) or credit card statement.
 
-function parseDate(raw: string): string {
-  const cleaned = raw.replace(/\s+/g, ' ').trim()
-  const d = new Date(cleaned)
-  if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+Rules:
+- Debit / Dr / Withdrawal / Purchase = "expense"
+- Credit / Cr / Deposit / NEFT Cr / UPI Cr = "income" — this includes salary, reimbursements, UPI received, NEFT received
+- For UPI transactions, extract the actual merchant or person name from the UPI reference string (e.g. "UPI-ZOMATO-zomato@..." → "Zomato")
+- For NEFT/RTGS, extract the sender/receiver name from the narration
+- Skip: opening balance, closing balance, self-transfers between own accounts, duplicate header rows
+- Amount must be a positive number (no sign)
+- Date must be ISO format: YYYY-MM-DD
+- Description max 80 chars, cleaned up (no raw UPI IDs, no ref numbers)
 
-  // Handle DD/MM/YYYY
-  const parts = cleaned.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/)
-  if (parts) {
-    const [, dd, mm, yy] = parts
-    const year = yy.length === 2 ? `20${yy}` : yy
-    return `${year}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
-  }
+Return ONLY a valid JSON array, no explanation, no markdown fences:
+[{"date":"YYYY-MM-DD","description":"clean name","amount":1234.56,"type":"expense|income"}]`
 
-  return new Date().toISOString().split('T')[0]
-}
+export async function extractTransactions(text: string): Promise<ExtractedTransaction[]> {
+  // Truncate very large statements — Claude handles ~100k chars comfortably
+  const truncated = text.slice(0, 100_000)
 
-function parseAmount(raw: string): number {
-  return parseFloat(raw.replace(/,/g, ''))
-}
-
-function guessCategory(desc: string): string {
-  const d = desc.toLowerCase()
-  if (/zomato|swiggy|restaurant|caf[eé]|food|blinkit|zepto|starbucks|domino|mcdonald|kfc|pizza|burger|dunzo/.test(d)) return 'food & drinks'
-  if (/uber|ola|rapido|metro|petrol|fuel|parking|fastag|irctc|railway|flight|airline|indigo|spicejet/.test(d)) return 'transport'
-  if (/amazon|flipkart|myntra|ajio|nykaa|shop|mall|store|meesho|snapdeal/.test(d)) return 'shopping'
-  if (/netflix|spotify|hotstar|prime|apple|jio|airtel/.test(d)) return 'subscriptions'
-  if (/electricity|water|gas|broadband|internet|bsnl|bescom|mseb/.test(d)) return 'utilities & bills'
-  if (/hospital|clinic|pharmacy|medical|doctor|apollo|1mg|practo/.test(d)) return 'health & wellness'
-  if (/salary|payroll|stipend|finarkein/.test(d)) return 'income'
-  if (/travel|holiday|booking\.com|makemytrip|goibibo|cleartrip/.test(d)) return 'travel'
-  if (/beauty|parlour|salon|spa|grooming/.test(d)) return 'personal care'
-  if (/grocery|bigbasket|grofers|dmart/.test(d)) return 'groceries'
-  return 'shopping'
-}
-
-export function extractTransactions(text: string): ExtractedTransaction[] {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 5)
-  const results: ExtractedTransaction[] = []
-
-  for (const line of lines) {
-    const dateMatch = line.match(DATE_RE)
-    if (!dateMatch) continue
-
-    const amountMatches = [...line.matchAll(AMOUNT_RE)]
-    if (!amountMatches.length) continue
-
-    // For CC statements: last amount on line is usually the transaction amount
-    const lastAmountRaw = amountMatches[amountMatches.length - 1][1]
-    const amount = parseAmount(lastAmountRaw)
-    if (amount <= 0 || amount > 10_000_000) continue
-
-    const isCr = CR_RE.test(line)
-    const type: 'expense' | 'income' = isCr ? 'income' : 'expense'
-
-    // Description = line minus date and amount tokens
-    const description = line
-      .replace(DATE_RE, '')
-      .replace(AMOUNT_RE, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-      .slice(0, 80)
-
-    results.push({
-      date: parseDate(dateMatch[0]),
-      description: description || 'Unknown',
-      amount,
-      type,
-      rawLine: line,
+  let raw: string
+  try {
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 8096,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: truncated }],
     })
+    raw = msg.content[0].type === 'text' ? msg.content[0].text : ''
+  } catch {
+    return []
   }
 
-  return results
+  // Extract JSON array from response (model may wrap in prose despite instructions)
+  const jsonMatch = raw.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) return []
+
+  try {
+    const parsed: Array<{ date: string; description: string; amount: number; type: string }> = JSON.parse(jsonMatch[0])
+    return parsed
+      .filter(t => t.date && t.description && t.amount > 0 && (t.type === 'expense' || t.type === 'income'))
+      .map(t => ({
+        date: t.date,
+        description: t.description.slice(0, 80),
+        amount: t.amount,
+        type: t.type as 'expense' | 'income',
+        rawLine: '',
+      }))
+  } catch {
+    return []
+  }
 }
 
-export function suggestCategory(description: string) {
-  return guessCategory(description)
+// Category suggestion — kept separate so it runs client-side in the preview step
+export function suggestCategory(description: string): string {
+  const d = description.toLowerCase()
+  if (/zomato|swiggy|restaurant|caf[eé]|food|blinkit|zepto|starbucks|domino|mcdonald|kfc|pizza|burger|dunzo/.test(d)) return 'Food & Dining'
+  if (/uber|ola|rapido|metro|petrol|fuel|parking|fastag|irctc|railway|flight|airline|indigo|spicejet/.test(d)) return 'Transport'
+  if (/amazon|flipkart|myntra|ajio|nykaa|shop|mall|store|meesho|snapdeal/.test(d)) return 'Shopping'
+  if (/netflix|spotify|hotstar|prime|apple|jio|airtel|broadband|cloud/.test(d)) return 'Subscriptions'
+  if (/electricity|water|gas|internet|bsnl|bescom|mseb/.test(d)) return 'Utilities'
+  if (/hospital|clinic|pharmacy|medical|doctor|apollo|1mg|practo/.test(d)) return 'Healthcare'
+  if (/salary|payroll|stipend|finarkein|reimbursement/.test(d)) return 'Income'
+  if (/travel|holiday|booking|makemytrip|goibibo|cleartrip/.test(d)) return 'Travel'
+  if (/beauty|parlour|salon|spa/.test(d)) return 'Personal Care'
+  if (/grocery|bigbasket|grofers|dmart|zepto/.test(d)) return 'Groceries'
+  if (/rent|maintenance|society/.test(d)) return 'Housing'
+  if (/mutual fund|sip|equity|stocks|zerodha|groww|kuvera/.test(d)) return 'Investments'
+  return 'Shopping'
 }
