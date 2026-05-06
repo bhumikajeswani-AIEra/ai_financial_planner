@@ -12,7 +12,6 @@ import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Wallet, Target, CreditCard } from 'lucide-react'
 import { format } from 'date-fns'
-import { GoogleIntegrations } from '@/components/dashboard/GoogleIntegrations'
 import type { Transaction, Category, Investment, SavingsGoal } from '@/lib/types'
 
 function parseMonth(ym: string) {
@@ -36,8 +35,6 @@ export default function DashboardPage() {
   const [accounts, setAccounts] = useState<{ id: string; balance: number; name: string }[]>([])
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null)
   const [excludeCC, setExcludeCC] = useState(false)
-  const [defaultCategoryId, setDefaultCategoryId] = useState('')
-  const [defaultAccountId, setDefaultAccountId] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -60,8 +57,6 @@ export default function DashboardPage() {
       setInvestments((invts ?? []) as Investment[])
       setGoals((glts ?? []) as SavingsGoal[])
       setAccounts(accts ?? [])
-      setDefaultCategoryId((cats ?? []).find((c: Category) => c.parent_id)?.id ?? '')
-      setDefaultAccountId((accts ?? [])[0]?.id ?? '')
     }
     load()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -318,12 +313,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Google Integrations */}
-      <GoogleIntegrations
-        defaultCategoryId={defaultCategoryId}
-        defaultAccountId={defaultAccountId}
-      />
 
       {/* Recent Transactions */}
       <Card>

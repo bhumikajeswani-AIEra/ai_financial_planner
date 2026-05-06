@@ -110,11 +110,11 @@ export default function InvestmentsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label>Buy Price (₹)</Label>
+                  <Label>Buy NAV / Price (₹ per unit)</Label>
                   <Input type="number" placeholder="0" value={form.buy_price} onChange={(e) => setForm({ ...form, buy_price: e.target.value })} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Current Price (₹)</Label>
+                  <Label>Current NAV / Price (₹ per unit)</Label>
                   <Input type="number" placeholder="0" value={form.current_price} onChange={(e) => setForm({ ...form, current_price: e.target.value })} />
                 </div>
               </div>
