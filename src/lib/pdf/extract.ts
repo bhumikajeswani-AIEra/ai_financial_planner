@@ -36,17 +36,17 @@ function parseAmount(raw: string): number {
 
 function guessCategory(desc: string): string {
   const d = desc.toLowerCase()
-  if (/zomato|swiggy|restaurant|café|cafe|food|hotel|eat/.test(d)) return 'Food & Dining'
-  if (/uber|ola|rapido|metro|petrol|fuel|parking/.test(d)) return 'Transport'
-  if (/amazon|flipkart|myntra|ajio|shop|mall|store/.test(d)) return 'Shopping'
-  if (/netflix|spotify|hotstar|prime|subscription|jio/.test(d)) return 'Subscriptions'
-  if (/electricity|water|gas|broadband|internet|airtel|bsnl/.test(d)) return 'Utilities'
-  if (/hospital|clinic|pharmacy|medical|doctor|apollo/.test(d)) return 'Healthcare'
-  if (/emi|loan|mortgage|home loan|car loan/.test(d)) return 'EMI'
-  if (/credit card|cc bill/.test(d)) return 'Credit Card Bill'
-  if (/salary|payroll|stipend/.test(d)) return 'Salary'
-  if (/travel|flight|airline|irctc|hotel|booking/.test(d)) return 'Travel'
-  return 'Shopping'
+  if (/zomato|swiggy|restaurant|caf[eé]|food|blinkit|zepto|starbucks|domino|mcdonald|kfc|pizza|burger|dunzo/.test(d)) return 'food & drinks'
+  if (/uber|ola|rapido|metro|petrol|fuel|parking|fastag|irctc|railway|flight|airline|indigo|spicejet/.test(d)) return 'transport'
+  if (/amazon|flipkart|myntra|ajio|nykaa|shop|mall|store|meesho|snapdeal/.test(d)) return 'shopping'
+  if (/netflix|spotify|hotstar|prime|apple|jio|airtel/.test(d)) return 'subscriptions'
+  if (/electricity|water|gas|broadband|internet|bsnl|bescom|mseb/.test(d)) return 'utilities & bills'
+  if (/hospital|clinic|pharmacy|medical|doctor|apollo|1mg|practo/.test(d)) return 'health & wellness'
+  if (/salary|payroll|stipend|finarkein/.test(d)) return 'income'
+  if (/travel|holiday|booking\.com|makemytrip|goibibo|cleartrip/.test(d)) return 'travel'
+  if (/beauty|parlour|salon|spa|grooming/.test(d)) return 'personal care'
+  if (/grocery|bigbasket|grofers|dmart/.test(d)) return 'groceries'
+  return 'shopping'
 }
 
 export function extractTransactions(text: string): ExtractedTransaction[] {
