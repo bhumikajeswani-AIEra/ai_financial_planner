@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Financial Planner
 
-## Getting Started
+A personal finance OS built for India — automatically ingests transactions from bank statements, Gmail alerts, and credit card PDFs, then gives you a clean monthly view of where your money goes.
 
-First, run the development server:
+## What it does
+
+Indian banking is fragmented. Money moves across HDFC, ICICI, Paytm, UPI, and credit cards with no unified view. This app connects those dots automatically.
+
+**Data in — 3 ways:**
+- Upload any bank or CC statement PDF (HDFC, ICICI, SBI, Axis, Paytm, Kotak) — Claude parses it, extracts all transactions including salary and NEFT credits
+- Gmail sync — reads bank debit/credit alerts from your inbox
+- Manual entry — add any transaction directly
+
+**Analysis:**
+- Monthly expense breakdown by L1 → L2 category (e.g. Food & Dining → Zomato)
+- Income vs. expense per month, salary auto-detected from NEFT credits
+- Budget tracking — set limits per category, see actuals in real time
+- Source tagging — UPI / RTGS / CC / Manual on every transaction
+- Investment portfolio tracking
+
+## Stack
+
+- **Frontend**: Next.js 15 (App Router), Tailwind CSS, shadcn/ui
+- **Backend**: Next.js API routes, Supabase (Postgres + Auth)
+- **AI**: Claude (Anthropic) — bank statement parsing
+- **Deployment**: Vercel
+
+## Getting started
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/bhumikajeswani-AIEra/ai_financial_planner.git
+cd ai_financial_planner
+npm install
+```
+
+### 2. Environment variables
+
+Create `.env.local`:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/google/callback
+```
+
+### 3. Run locally
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Uploading bank statements
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The statement parser handles any PDF from HDFC, ICICI, SBI, Axis, Paytm, Kotak — including credit card statements.
 
-## Learn More
+**If your PDF is password-protected** (common with HDFC/ICICI):
+1. Open the PDF in Chrome and enter your password
+2. `Cmd+P` → Save as PDF
+3. Upload the unlocked version
 
-To learn more about Next.js, take a look at the following resources:
+The parser extracts both debits (expenses) and credits (salary, reimbursements, UPI received) automatically.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Syncing from Gmail
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Run the sync script to import transactions from Gmail bank alerts:
 
-## Deploy on Vercel
+```bash
+SUPABASE_SERVICE_ROLE_KEY=your_key node scripts/sync-gmail-transactions.mjs
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deployment
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Deployed on Vercel. Set all environment variables under Project → Settings → Environment Variables.
+
+```bash
+vercel --prod
+```
