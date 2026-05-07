@@ -286,17 +286,14 @@ export default function ExpensesPage() {
           <h1 className="text-xl font-semibold">Expenses</h1>
           <p className="text-sm text-muted-foreground">{availableMonths.length} months of data</p>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <div className="flex gap-2">
-            <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handlePdfUpload} />
-            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
-              <Upload className="h-4 w-4 mr-1" /> Upload Statement
-            </Button>
-            <Button size="sm" onClick={() => setOpen(true)}>
-              <Plus className="h-4 w-4 mr-1" /> Add
-            </Button>
-          </div>
-          <p className="text-[10px] text-muted-foreground">HDFC · ICICI · SBI · Axis · Paytm · CC — or Print to PDF from net banking</p>
+        <div className="flex gap-2">
+          <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handlePdfUpload} />
+          <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
+            <Upload className="h-4 w-4 mr-1" /> Upload Statement
+          </Button>
+          <Button size="sm" onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4 mr-1" /> Add
+          </Button>
         </div>
       </div>
 

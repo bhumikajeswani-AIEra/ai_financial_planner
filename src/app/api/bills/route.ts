@@ -21,14 +21,15 @@ export async function POST(req: NextRequest) {
     const pdf = await pdfParse(buffer)
     text = pdf.text
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (msg.toLowerCase().includes('encrypt') || msg.toLowerCase().includes('password')) {
-      return NextResponse.json({
-        error: 'This PDF is password-protected (common with HDFC/ICICI statements). Open it in Chrome, enter your password, then File → Print → Save as PDF and upload that instead.',
-        transactions: [],
-      }, { status: 422 })
-    }
-    return NextResponse.json({ error: 'Could not read PDF. Please try a different file.', transactions: [] }, { status: 422 })
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
+    const isProtected = msg.includes('encrypt') || msg.includes('password') ||
+      msg.includes('bad xref') || msg.includes('invalid pdf') || msg.includes('xref')
+    return NextResponse.json({
+      error: isProtected
+        ? 'This PDF is password-protected. Open it in Chrome, enter your password, then Cmd+P → Save as PDF and upload that instead.'
+        : 'Could not read this PDF. If it\'s password-protected, open it in Chrome → Cmd+P → Save as PDF, then re-upload.',
+      transactions: [],
+    }, { status: 422 })
   }
 
   const extracted = await extractTransactions(text)
