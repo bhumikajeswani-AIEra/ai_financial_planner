@@ -2,6 +2,24 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { extractTransactions, suggestCategory } from '@/lib/pdf/extract'
 
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  // Try unpdf first — better compatibility with ICICI/HDFC/modern PDFs
+  try {
+    const { extractText } = await import('unpdf')
+    const uint8 = new Uint8Array(buffer)
+    const { text } = await extractText(uint8, { mergePages: true })
+    if (text && text.trim().length > 50) return text
+  } catch (e) {
+    console.error('[bills] unpdf failed:', e instanceof Error ? e.message : String(e))
+  }
+
+  // Fallback to pdf-parse
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pdfParse = require('pdf-parse/lib/pdf-parse.js')
+  const pdf = await pdfParse(buffer)
+  return pdf.text
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -15,19 +33,24 @@ export async function POST(req: NextRequest) {
 
   let text: string
   try {
-    // Use lib path directly to avoid pdf-parse loading test files (causes slowness)
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse/lib/pdf-parse.js')
-    const pdf = await pdfParse(buffer)
-    text = pdf.text
+    text = await extractPdfText(buffer)
   } catch (err: unknown) {
-    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
-    const isProtected = msg.includes('encrypt') || msg.includes('password') ||
-      msg.includes('bad xref') || msg.includes('invalid pdf') || msg.includes('xref')
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[bills] pdf extraction error:', msg)
+    const lower = msg.toLowerCase()
+    const isProtected = lower.includes('encrypt') || lower.includes('password') ||
+      lower.includes('bad xref') || lower.includes('invalid pdf') || lower.includes('xref')
     return NextResponse.json({
       error: isProtected
         ? 'This PDF is password-protected. Open it in Chrome, enter your password, then Cmd+P → Save as PDF and upload that instead.'
-        : 'Could not read this PDF. If it\'s password-protected, open it in Chrome → Cmd+P → Save as PDF, then re-upload.',
+        : `Could not read this PDF (${msg.slice(0, 80)}). Try opening it in Chrome → Cmd+P → Save as PDF, then re-upload.`,
+      transactions: [],
+    }, { status: 422 })
+  }
+
+  if (!text || text.trim().length < 50) {
+    return NextResponse.json({
+      error: 'This PDF appears to be a scanned image with no text layer. Try downloading the statement directly from your bank\'s net banking portal.',
       transactions: [],
     }, { status: 422 })
   }
