@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import Anthropic, { type DocumentBlockParam } from '@anthropic-ai/sdk'
 
 export interface ExtractedTransaction {
   date: string
@@ -10,39 +10,63 @@ export interface ExtractedTransaction {
 
 const client = new Anthropic()
 
-const SYSTEM_PROMPT = `You are a bank statement parser. Extract all financial transactions from the raw text of an Indian bank statement (HDFC, ICICI, SBI, Axis, Paytm, Kotak, Yes Bank, IndusInd, etc.) or credit card statement.
+const SYSTEM_PROMPT = `You are a bank statement parser for Indian banks and credit cards (HDFC, ICICI, SBI, Axis, Kotak, Yes Bank, IndusInd, Paytm, AMEX, etc.).
 
-Rules:
-- Debit / Dr / Withdrawal / Purchase = "expense"
-- Credit / Cr / Deposit / NEFT Cr / UPI Cr = "income" — this includes salary, reimbursements, UPI received, NEFT received
-- For UPI transactions, extract the actual merchant or person name from the UPI reference string (e.g. "UPI-ZOMATO-zomato@..." → "Zomato")
-- For NEFT/RTGS, extract the sender/receiver name from the narration
-- Skip: opening balance, closing balance, self-transfers between own accounts, duplicate header rows
-- Amount must be a positive number (no sign)
-- Date must be ISO format: YYYY-MM-DD
-- Description max 80 chars, cleaned up (no raw UPI IDs, no ref numbers)
+Extract every financial transaction from the statement. Rules:
 
-Return ONLY a valid JSON array, no explanation, no markdown fences:
-[{"date":"YYYY-MM-DD","description":"clean name","amount":1234.56,"type":"expense|income"}]`
+TYPE:
+- Debit / Dr / Withdrawal / Purchase / Payment / POS / ATM WDL / Spent = "expense"
+- Credit / Cr / Deposit / NEFT Cr / UPI Cr / IMPS Cr / RTGS Cr / Salary / By Transfer / By Clearing / Refund / Cashback = "income"
+- When the statement has separate Debit and Credit columns: if the Credit column has the value → "income", if the Debit column has the value → "expense"
 
-export async function extractTransactions(text: string): Promise<ExtractedTransaction[]> {
-  // Truncate very large statements — Claude handles ~100k chars comfortably
-  const truncated = text.slice(0, 100_000)
+DESCRIPTION:
+- UPI: extract merchant/person name from UPI string (e.g. "UPI-ZOMATO-zomato@okicici" → "Zomato")
+- NEFT/RTGS/IMPS: extract sender or receiver name from narration
+- Strip ref numbers, transaction IDs, UPI IDs, VPA strings
+- Max 60 chars, title-cased
 
+DATE: ISO format YYYY-MM-DD. If year is missing, infer from statement period.
+
+AMOUNT: positive number, no currency symbol, no commas.
+
+SKIP: opening balance, closing balance, sub-total, grand total, duplicate header rows only.
+
+Return ONLY a valid JSON array with no explanation, no markdown:
+[{"date":"YYYY-MM-DD","description":"Merchant Name","amount":1234.56,"type":"expense"}]`
+
+export async function extractTransactions(pdfBase64: string): Promise<ExtractedTransaction[]> {
   let raw: string
   try {
     const msg = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8096,
+      model: 'claude-sonnet-4-6',
+      max_tokens: 16000,
       system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: truncated }],
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data: pdfBase64,
+              },
+            } satisfies DocumentBlockParam,
+            {
+              type: 'text',
+              text: 'Extract all transactions from this bank or credit card statement as a JSON array.',
+            },
+          ],
+        },
+      ],
     })
     raw = msg.content[0].type === 'text' ? msg.content[0].text : ''
-  } catch {
+  } catch (err) {
+    console.error('[extract] Claude error:', err instanceof Error ? err.message : String(err))
     return []
   }
 
-  // Extract JSON array from response (model may wrap in prose despite instructions)
   const jsonMatch = raw.match(/\[[\s\S]*\]/)
   if (!jsonMatch) return []
 
@@ -62,7 +86,6 @@ export async function extractTransactions(text: string): Promise<ExtractedTransa
   }
 }
 
-// Category suggestion — kept separate so it runs client-side in the preview step
 export function suggestCategory(description: string): string {
   const d = description.toLowerCase()
   if (/zomato|swiggy|restaurant|caf[eé]|food|blinkit|zepto|starbucks|domino|mcdonald|kfc|pizza|burger|dunzo/.test(d)) return 'Food & Dining'
@@ -71,10 +94,10 @@ export function suggestCategory(description: string): string {
   if (/netflix|spotify|hotstar|prime|apple|jio|airtel|broadband|cloud/.test(d)) return 'Subscriptions'
   if (/electricity|water|gas|internet|bsnl|bescom|mseb/.test(d)) return 'Utilities'
   if (/hospital|clinic|pharmacy|medical|doctor|apollo|1mg|practo/.test(d)) return 'Healthcare'
-  if (/salary|payroll|stipend|finarkein|reimbursement/.test(d)) return 'Income'
+  if (/salary|payroll|stipend|finarkein|reimbursement|neft cr|imps cr|rtgs cr/.test(d)) return 'Salary'
   if (/travel|holiday|booking|makemytrip|goibibo|cleartrip/.test(d)) return 'Travel'
   if (/beauty|parlour|salon|spa/.test(d)) return 'Personal Care'
-  if (/grocery|bigbasket|grofers|dmart|zepto/.test(d)) return 'Groceries'
+  if (/grocery|bigbasket|grofers|dmart/.test(d)) return 'Groceries'
   if (/rent|maintenance|society/.test(d)) return 'Housing'
   if (/mutual fund|sip|equity|stocks|zerodha|groww|kuvera/.test(d)) return 'Investments'
   return 'Shopping'

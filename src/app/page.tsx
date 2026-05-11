@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Wallet, Target, CreditCard } from 'lucide-react'
+import { ChevronLeft, ChevronRight, TrendingDown, Wallet, Target, CreditCard } from 'lucide-react'
 import { format } from 'date-fns'
 import type { Transaction, Category, Investment, SavingsGoal } from '@/lib/types'
 
@@ -136,16 +136,6 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthTxns, excludeCC, ccL1Ids, ccL2Ids])
 
-  const monthIncome = useMemo(() =>
-    monthTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0),
-    [monthTxns]
-  )
-
-  const savingsRate = useMemo(() => {
-    if (monthIncome === 0) return 0
-    return Math.round(((monthIncome - filteredMonthExpenses) / monthIncome) * 100)
-  }, [monthIncome, filteredMonthExpenses])
-
   // Net worth
   const totalCurrentValue = useMemo(
     () => investments.reduce((s, i) => s + i.current_price * i.units, 0),
@@ -228,7 +218,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <SummaryCard
           title="Net Worth"
           value={formatCurrency(netWorth)}
@@ -240,20 +230,6 @@ export default function DashboardPage() {
           value={formatCurrency(filteredMonthExpenses)}
           icon={<TrendingDown className="h-4 w-4 text-destructive" />}
           sub={monthLabel}
-          highlight={filteredMonthExpenses > monthIncome && monthIncome > 0}
-        />
-        <SummaryCard
-          title="Income"
-          value={formatCurrency(monthIncome)}
-          icon={<TrendingUp className="h-4 w-4 text-green-500" />}
-          sub={monthLabel}
-        />
-        <SummaryCard
-          title="Savings Rate"
-          value={`${savingsRate}%`}
-          icon={<TrendingUp className="h-4 w-4" />}
-          sub="(income − expenses) / income"
-          highlight={savingsRate < 0}
         />
       </div>
 
