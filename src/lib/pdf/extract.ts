@@ -1,4 +1,4 @@
-import Anthropic, { type DocumentBlockParam } from '@anthropic-ai/sdk'
+import Anthropic from '@anthropic-ai/sdk'
 
 export interface ExtractedTransaction {
   date: string
@@ -52,7 +52,7 @@ export async function extractTransactions(pdfBase64: string): Promise<ExtractedT
                 media_type: 'application/pdf',
                 data: pdfBase64,
               },
-            } satisfies DocumentBlockParam,
+            },
             {
               type: 'text',
               text: 'Extract all transactions from this bank or credit card statement as a JSON array.',
